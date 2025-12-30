@@ -35,18 +35,33 @@ def getWorld2View(R, t):
     Rt[3, 3] = 1.0
     return np.float32(Rt)
 
-def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
-    Rt = np.zeros((4, 4))
-    Rt[:3, :3] = R.transpose()
+# def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
+#     Rt = np.zeros((4, 4))
+#     Rt[:3, :3] = R.transpose()
+#     Rt[:3, 3] = t
+#     Rt[3, 3] = 1.0
+
+#     C2W = np.linalg.inv(Rt)
+#     cam_center = C2W[:3, 3]
+#     cam_center = (cam_center + translate) * scale
+#     C2W[:3, 3] = cam_center
+#     Rt = np.linalg.inv(C2W)
+#     return np.float32(Rt)
+
+def getWorld2View2(R, t, translate=torch.tensor([0.0, 0.0, 0.0]), scale=1.0):
+    translate = translate.to(R.device)
+    Rt = torch.zeros((4, 4), device=R.device)
+    # Rt[:3, :3] = R.transpose(0, 1)
+    Rt[:3, :3] = R
     Rt[:3, 3] = t
     Rt[3, 3] = 1.0
 
-    C2W = np.linalg.inv(Rt)
+    C2W = torch.linalg.inv(Rt)
     cam_center = C2W[:3, 3]
     cam_center = (cam_center + translate) * scale
     C2W[:3, 3] = cam_center
-    Rt = np.linalg.inv(C2W)
-    return np.float32(Rt)
+    Rt = torch.linalg.inv(C2W)
+    return Rt
 
 def getProjectionMatrix(znear, zfar, fovX, fovY):
     tanHalfFovY = math.tan((fovY / 2))
@@ -69,6 +84,29 @@ def getProjectionMatrix(znear, zfar, fovX, fovY):
     P[2, 2] = z_sign * zfar / (zfar - znear)
     P[2, 3] = -(zfar * znear) / (zfar - znear)
     return P
+
+def getProjectionMatrix2(znear, zfar, fovX, fovY, W, H, cx, cy): 
+     fx = fov2focal(fovX, W)
+     fy = fov2focal(fovY, H)
+    #  cx = prcp[0] * W 
+    #  cy = prcp[1] * H
+     top = znear * cy / fy 
+     bottom = -znear * (H - cy) / fy 
+     right = znear * (W - cx) / fx 
+     left = -znear * cx / fx 
+  
+     P = torch.zeros(4, 4) 
+     z_sign = 1.0 
+  
+     P[0, 0] = 2.0 * znear / (right - left) 
+     P[1, 1] = 2.0 * znear / (top - bottom) 
+     P[0, 2] = -(right + left) / (right - left) 
+     P[1, 2] = (top + bottom) / (top - bottom) 
+     P[3, 2] = z_sign 
+     P[2, 2] = z_sign * zfar / (zfar - znear) 
+     P[2, 3] = -(zfar * znear) / (zfar - znear) 
+  
+     return P
 
 def fov2focal(fov, pixels):
     return pixels / (2 * math.tan(fov / 2))

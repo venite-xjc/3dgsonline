@@ -1,4 +1,4 @@
-name: gaussian_splatting
+name: livo2gs
 channels:
   - pytorch
   - conda-forge

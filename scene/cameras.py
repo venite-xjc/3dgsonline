@@ -12,7 +12,7 @@
 import torch
 from torch import nn
 import numpy as np
-from utils.graphics_utils import getWorld2View2, getProjectionMatrix
+from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getProjectionMatrix2
 from utils.general_utils import PILtoTorch
 import cv2
 
@@ -87,6 +87,13 @@ class Camera(nn.Module):
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
+
+        self.cam_rot_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device="cuda")
+        )
+        self.cam_trans_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device="cuda")
+        )
         
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
@@ -98,6 +105,69 @@ class MiniCam:
         self.zfar = zfar
         self.world_view_transform = world_view_transform
         self.full_proj_transform = full_proj_transform
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
         view_inv = torch.inverse(self.world_view_transform)
         self.camera_center = view_inv[3][:3]
 
+        self.cam_rot_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device="cuda")
+        )
+        self.cam_trans_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device="cuda")
+        )
+
+class OnlineCam:
+    def __init__(self, width, height, fovy, fovx, znear, zfar, cx, cy, original_image, R, T, data_device='cuda', id=0):
+        self.image_width = width
+        self.image_height = height    
+        self.FoVy = fovy
+        self.FoVx = fovx
+        self.znear = znear
+        self.zfar = zfar
+        self.R = torch.from_numpy(R).float().cuda().T # W2C矩阵的R部分
+        self.T = torch.from_numpy(T).float().cuda()   # W2C矩阵的t部分
+        self.id = id
+
+        self.trained_iter = 0
+
+        original_image = torch.from_numpy(original_image).to(torch.float32).to(data_device)
+        if original_image.max()>1.01:
+            original_image = original_image / 255.0
+        self.original_image = original_image.clamp(0.0, 1.0).permute(2, 0, 1)
+
+        
+        # self.world_view_transform = torch.tensor(getWorld2View2(R, T)).transpose(0, 1).cuda()
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
+        # self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        # self.camera_center = self.world_view_transform.inverse()[3, :3]
+
+        self.alpha_mask = None
+
+        self.exposure_param = nn.Parameter(torch.zeros(6, device="cuda").requires_grad_(True))
+
+        self.cam_rot_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device="cuda")
+        )
+        self.cam_trans_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device="cuda")
+        )
+
+    @property
+    def world_view_transform(self): # W2C.T
+        return torch.tensor(getWorld2View2(self.R, self.T).transpose(0, 1)).cuda()
+
+    @property
+    def full_proj_transform(self):
+        return (
+            self.world_view_transform.unsqueeze(0).bmm(
+                self.projection_matrix.unsqueeze(0)
+            )
+        ).squeeze(0)
+
+    @property
+    def camera_center(self):
+        return self.world_view_transform.inverse()[3, :3]
+
+    def update_RT(self, R, t):
+        self.R = R.to(device="cuda")
+        self.T = t.to(device="cuda")

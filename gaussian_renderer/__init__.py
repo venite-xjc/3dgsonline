@@ -11,7 +11,7 @@
 
 import torch
 import math
-from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+from diff_gaussian_rasterization_w_pose import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
@@ -42,11 +42,12 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform,
         projmatrix=viewpoint_camera.full_proj_transform,
+        projmatrix_raw=viewpoint_camera.projection_matrix,
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipe.debug,
-        antialiasing=pipe.antialiasing
+        # antialiasing=pipe.antialiasing
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -97,9 +98,11 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             opacities = opacity,
             scales = scales,
             rotations = rotations,
-            cov3D_precomp = cov3D_precomp)
+            cov3D_precomp = cov3D_precomp,
+            theta=viewpoint_camera.cam_rot_delta,
+            rho=viewpoint_camera.cam_trans_delta,)
     else:
-        rendered_image, radii, depth_image = rasterizer(
+        rendered_image, radii, depth_image, opacity_, n_touch = rasterizer(
             means3D = means3D,
             means2D = means2D,
             shs = shs,
@@ -107,7 +110,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             opacities = opacity,
             scales = scales,
             rotations = rotations,
-            cov3D_precomp = cov3D_precomp)
+            cov3D_precomp = cov3D_precomp,
+            theta=viewpoint_camera.cam_rot_delta,
+            rho=viewpoint_camera.cam_trans_delta,)
         
     # Apply exposure to rendered image (training only)
     if use_trained_exp:
@@ -122,7 +127,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         "viewspace_points": screenspace_points,
         "visibility_filter" : (radii > 0).nonzero(),
         "radii": radii,
-        "depth" : depth_image
+        "depth" : depth_image,
+        "T_left": 1-opacity_
         }
     
     return out
